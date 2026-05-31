@@ -1,15 +1,15 @@
 """
 One-time ingestion script.
 Scrapes 7 Wikipedia articles, chunks them, embeds with sentence-transformers,
-and stores in ChromaDB. Safe to run multiple times (uses upsert).
+and stores in a lightweight numpy vector store. Safe to run multiple times (upsert).
 """
 
 import sys
 import requests
 from bs4 import BeautifulSoup
 import tiktoken
-import chromadb
 from sentence_transformers import SentenceTransformer
+from vector_store import VectorStore
 
 ARTICLES = [
     {"url": "https://en.wikipedia.org/wiki/Retrieval-augmented_generation",      "title": "Retrieval-Augmented Generation"},
@@ -21,10 +21,8 @@ ARTICLES = [
     {"url": "https://en.wikipedia.org/wiki/Multi-agent_system",                  "title": "Multi-Agent System"},
 ]
 
-CHUNK_SIZE   = 300   # tokens
-OVERLAP      = 50    # tokens
-PERSIST_DIR  = "./chroma_store"
-COLLECTION   = "knowledge_base"
+CHUNK_SIZE  = 300  # tokens
+OVERLAP     = 50   # tokens
 
 
 def scrape(url: str) -> str:
@@ -56,13 +54,7 @@ def chunk(text: str) -> list[str]:
 def ingest():
     print("Loading embedding model (all-MiniLM-L6-v2)…")
     model = SentenceTransformer("all-MiniLM-L6-v2")
-
-    print("Connecting to ChromaDB…")
-    client = chromadb.PersistentClient(path=PERSIST_DIR)
-    collection = client.get_or_create_collection(
-        name=COLLECTION,
-        metadata={"hnsw:space": "cosine"},
-    )
+    store = VectorStore()
 
     for article in ARTICLES:
         print(f"\n→ {article['title']}")
@@ -76,37 +68,28 @@ def ingest():
             print(f"  {len(chunks)} chunks")
 
             embeddings = model.encode(chunks, show_progress_bar=False).tolist()
-
-            ids = [f"{article['url']}::chunk_{i}" for i in range(len(chunks))]
-            metadatas = [
+            ids        = [f"{article['url']}::chunk_{i}" for i in range(len(chunks))]
+            metadatas  = [
                 {"source": article["url"], "title": article["title"], "chunk_index": i}
                 for i in range(len(chunks))
             ]
 
-            collection.upsert(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
+            store.upsert(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
             print(f"  ✓ upserted")
 
         except Exception as exc:
             print(f"  ✗ Error: {exc}", file=sys.stderr)
 
-    print(f"\n✓ Done. Total chunks in DB: {collection.count()}")
+    print(f"\n✓ Done. Total chunks: {store.count()}")
 
 
 def ensure_collection():
-    """
-    Idempotent setup called on app startup.
-    If the collection is already populated, returns immediately.
-    Otherwise runs full ingestion.
-    """
-    client = chromadb.PersistentClient(path=PERSIST_DIR)
-    collection = client.get_or_create_collection(
-        name=COLLECTION,
-        metadata={"hnsw:space": "cosine"},
-    )
-    if collection.count() > 0:
-        print(f"✓ Collection ready ({collection.count()} chunks). Skipping ingestion.")
+    """Idempotent — only ingests if the store is empty."""
+    store = VectorStore()
+    if store.count() > 0:
+        print(f"✓ Store ready ({store.count()} chunks). Skipping ingestion.")
         return
-    print("Collection empty — running ingestion…")
+    print("Store empty — running ingestion…")
     ingest()
 
 

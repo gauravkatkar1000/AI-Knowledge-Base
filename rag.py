@@ -1,21 +1,19 @@
 """
 RAG pipeline.
-Embeds query → retrieves from ChromaDB → builds prompt → calls Groq LLM.
+Embeds query → retrieves from numpy vector store → builds prompt → calls Groq LLM.
 All heavy objects are lazily initialised once and reused.
 """
 
 import os
 from groq import Groq
-import chromadb
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
+from vector_store import VectorStore
 
 load_dotenv()
 
-PERSIST_DIR = "./chroma_store"
-COLLECTION  = "knowledge_base"
-TOP_K       = 5
-LLM_MODEL   = "llama-3.3-70b-versatile"
+TOP_K     = 5
+LLM_MODEL = "llama-3.3-70b-versatile"
 
 SYSTEM_PROMPT = (
     "You are an expert AI research assistant. "
@@ -26,8 +24,8 @@ SYSTEM_PROMPT = (
 )
 
 _embed_model: SentenceTransformer | None = None
-_collection = None
-_groq: Groq | None = None
+_store:       VectorStore | None         = None
+_groq:        Groq | None                = None
 
 
 def _get_embed_model() -> SentenceTransformer:
@@ -37,12 +35,11 @@ def _get_embed_model() -> SentenceTransformer:
     return _embed_model
 
 
-def _get_collection():
-    global _collection
-    if _collection is None:
-        client = chromadb.PersistentClient(path=PERSIST_DIR)
-        _collection = client.get_collection(COLLECTION)
-    return _collection
+def _get_store() -> VectorStore:
+    global _store
+    if _store is None:
+        _store = VectorStore()
+    return _store
 
 
 def _get_groq() -> Groq:
@@ -60,11 +57,7 @@ def retrieve(query: str) -> list[dict]:
     model = _get_embed_model()
     q_emb = model.encode([query]).tolist()[0]
 
-    results = _get_collection().query(
-        query_embeddings=[q_emb],
-        n_results=TOP_K,
-        include=["documents", "metadatas", "distances"],
-    )
+    results = _get_store().query(query_embedding=q_emb, n_results=TOP_K)
 
     chunks = []
     for doc, meta, dist in zip(
