@@ -101,7 +101,7 @@ answer cites its source.
     st.divider()
 
     st.markdown(
-        "[← Back to Portfolio](https://portfolio-theta-dun-76.vercel.app)",
+        "[← Back to Portfolio](https://gauravkatkar1000.vercel.app)",
         unsafe_allow_html=False,
     )
     st.markdown("Built by **Gaurav Katkar**")
